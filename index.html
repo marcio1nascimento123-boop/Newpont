@@ -347,6 +347,13 @@ tr:last-child td{border-bottom:none;}
 .modal-actions .cancel{background:none; color:var(--ink);}
 
 .modal-wide{max-width:340px; text-align:left;}
+.toggle-group{display:flex; gap:8px;}
+.toggle-btn{
+  flex:1; padding:8px 0; border:1.5px solid var(--ink); background:#fff;
+  border-radius:4px; font-family:'Inter',sans-serif; font-size:13px; font-weight:600;
+  cursor:pointer;
+}
+.toggle-btn.active{background:var(--ink); color:#fff;}
 
 .fullscreen-overlay{
   position:fixed; inset:0; background:#f4f1ea;
@@ -555,12 +562,23 @@ tr:last-child td{border-bottom:none;}
     <h3 id="authTitle">Entrar</h3>
     <p class="hint-text" id="authHint">Acesso restrito. Entre com sua conta.</p>
     <div class="field-row">
-      <label for="authEmail">E-mail</label>
-      <input type="email" id="authEmail" autocomplete="username" placeholder="seu@email.com">
+      <label>Entrar com</label>
+      <div class="toggle-group">
+        <button type="button" class="toggle-btn active" id="idTypeEmailBtn">E-mail</button>
+        <button type="button" class="toggle-btn" id="idTypeCpfBtn">CPF</button>
+      </div>
+    </div>
+    <div class="field-row">
+      <label for="authIdentifier" id="authIdentifierLabel">E-mail</label>
+      <input type="text" id="authIdentifier" autocomplete="username" placeholder="seu@email.com">
     </div>
     <div class="field-row">
       <label for="authPassword">Senha</label>
       <input type="password" id="authPassword" autocomplete="current-password">
+    </div>
+    <div class="field-row" id="authPasswordConfirmRow" style="display:none;">
+      <label for="authPasswordConfirm">Confirmar senha</label>
+      <input type="password" id="authPasswordConfirm" autocomplete="new-password">
     </div>
     <div class="field-row" id="authInviteRow" style="display:none;">
       <label for="authInvite">Código de convite</label>
@@ -1620,50 +1638,108 @@ document.getElementById('fsNextMonthBtn').addEventListener('click', ()=>{
 const INVITE_CODE_HASH_RUNTIME = 'ed6897c951589c723ff26a295540194e538f8394de4734ea557317231060886b';
 
 let authMode = 'login'; // 'login' ou 'signup'
+let idType = 'email'; // 'email' ou 'cpf'
 
+function clearAuthFields(){
+  document.getElementById('authIdentifier').value = '';
+  document.getElementById('authPassword').value = '';
+  document.getElementById('authPasswordConfirm').value = '';
+  document.getElementById('authInvite').value = '';
+  document.getElementById('authError').textContent = '';
+}
 function showAuthOverlay(){
   document.getElementById('authOverlay').classList.add('show');
 }
 function hideAuthOverlay(){
   document.getElementById('authOverlay').classList.remove('show');
-  document.getElementById('authEmail').value = '';
-  document.getElementById('authPassword').value = '';
-  document.getElementById('authInvite').value = '';
+  clearAuthFields();
+}
+function setIdType(type){
+  idType = type;
+  const input = document.getElementById('authIdentifier');
+  const label = document.getElementById('authIdentifierLabel');
+  document.getElementById('idTypeEmailBtn').classList.toggle('active', type==='email');
+  document.getElementById('idTypeCpfBtn').classList.toggle('active', type==='cpf');
   document.getElementById('authError').textContent = '';
+  input.value = '';
+  if(type === 'cpf'){
+    label.textContent = 'CPF';
+    input.setAttribute('inputmode','numeric');
+    input.setAttribute('placeholder','Somente números');
+    input.setAttribute('autocomplete','off');
+    input.setAttribute('maxlength','14');
+  }else{
+    label.textContent = 'E-mail';
+    input.setAttribute('inputmode','email');
+    input.setAttribute('placeholder','seu@email.com');
+    input.setAttribute('autocomplete','username');
+    input.removeAttribute('maxlength');
+  }
+}
+function isValidCPF(cpf){
+  const s = cpf.replace(/\D/g,'');
+  if(s.length !== 11 || /^(\d)\1{10}$/.test(s)) return false;
+  let soma = 0;
+  for(let i=0;i<9;i++) soma += parseInt(s[i]) * (10-i);
+  let resto = (soma*10) % 11;
+  if(resto===10) resto=0;
+  if(resto !== parseInt(s[9])) return false;
+  soma = 0;
+  for(let i=0;i<10;i++) soma += parseInt(s[i]) * (11-i);
+  resto = (soma*10) % 11;
+  if(resto===10) resto=0;
+  return resto === parseInt(s[10]);
+}
+// Firebase Auth exige formato de e-mail; quando a pessoa escolhe CPF,
+// convertemos por baixo dos panos pra um "e-mail" interno único.
+function identifierToAuthEmail(type, value){
+  if(type === 'cpf'){
+    const digits = value.replace(/\D/g,'');
+    return `cpf${digits}@pontoapp.local`;
+  }
+  return value.trim();
 }
 function setAuthMode(mode){
   authMode = mode;
+  clearAuthFields();
   const title = document.getElementById('authTitle');
   const hint = document.getElementById('authHint');
   const inviteRow = document.getElementById('authInviteRow');
+  const confirmRow = document.getElementById('authPasswordConfirmRow');
   const submitBtn = document.getElementById('authSubmit');
   const toggleLink = document.getElementById('authToggleLink');
-  document.getElementById('authError').textContent = '';
   if(mode === 'signup'){
     title.textContent = 'Criar conta';
-    hint.textContent = 'Escolha um e-mail e senha e informe o código de convite fornecido pelo administrador.';
+    hint.textContent = 'Escolha um e-mail (ou CPF) e senha e informe o código de convite fornecido pelo administrador.';
     inviteRow.style.display = 'block';
+    confirmRow.style.display = 'block';
     submitBtn.textContent = 'Criar conta';
     toggleLink.textContent = 'Já tem conta? Entrar';
   }else{
     title.textContent = 'Entrar';
     hint.textContent = 'Acesso restrito. Entre com sua conta.';
     inviteRow.style.display = 'none';
+    confirmRow.style.display = 'none';
     submitBtn.textContent = 'Entrar';
     toggleLink.textContent = 'Tem um código de convite? Criar conta';
   }
 }
 async function onAuthSubmit(){
-  const email = document.getElementById('authEmail').value.trim();
+  const raw = document.getElementById('authIdentifier').value.trim();
   const senha = document.getElementById('authPassword').value;
   const errorEl = document.getElementById('authError');
-  if(!email || !senha){ errorEl.textContent = 'Preencha e-mail e senha.'; return; }
+  const idLabel = idType === 'cpf' ? 'CPF' : 'e-mail';
+  if(!raw || !senha){ errorEl.textContent = `Preencha ${idLabel} e senha.`; return; }
+  if(idType === 'cpf' && !isValidCPF(raw)){ errorEl.textContent = 'CPF inválido.'; return; }
   if(senha.length < 6){ errorEl.textContent = 'A senha deve ter pelo menos 6 caracteres.'; return; }
+  const authEmail = identifierToAuthEmail(idType, raw);
   errorEl.textContent = '';
   const btn = document.getElementById('authSubmit');
   btn.disabled = true;
 
   if(authMode === 'signup'){
+    const senhaConfirm = document.getElementById('authPasswordConfirm').value;
+    if(senha !== senhaConfirm){ errorEl.textContent = 'As senhas não coincidem.'; btn.disabled = false; return; }
     const invite = document.getElementById('authInvite').value;
     if(!invite){ errorEl.textContent = 'Informe o código de convite.'; btn.disabled = false; return; }
     const inviteHash = await hashText('invite::'+invite);
@@ -1674,15 +1750,21 @@ async function onAuthSubmit(){
     }
     btn.textContent = 'Criando conta...';
     try{
-      await auth.createUserWithEmailAndPassword(email, senha);
+      await auth.createUserWithEmailAndPassword(authEmail, senha);
       // onAuthStateChanged cuida do resto
     }catch(e){
       if(e.code === 'auth/email-already-in-use'){
-        errorEl.textContent = 'Esse e-mail já tem conta. Tente entrar.';
+        errorEl.textContent = idType==='cpf' ? 'Esse CPF já tem conta. Tente entrar.' : 'Esse e-mail já tem conta. Tente entrar.';
       }else if(e.code === 'auth/invalid-email'){
-        errorEl.textContent = 'E-mail inválido.';
+        errorEl.textContent = 'E-mail inválido — digite um e-mail de verdade, tipo nome@gmail.com.';
+      }else if(e.code === 'auth/weak-password'){
+        errorEl.textContent = 'Senha muito fraca. Use pelo menos 6 caracteres.';
+      }else if(e.code === 'auth/operation-not-allowed'){
+        errorEl.textContent = 'Login por e-mail/senha ainda não foi ativado no Firebase (Authentication → Sign-in method).';
+      }else if(e.code === 'auth/network-request-failed'){
+        errorEl.textContent = 'Sem conexão com a internet. Verifique e tente de novo.';
       }else{
-        errorEl.textContent = 'Não foi possível criar a conta.';
+        errorEl.textContent = 'Não foi possível criar a conta (' + (e.code || e.message || 'erro desconhecido') + ').';
       }
     }finally{
       btn.disabled = false;
@@ -1691,9 +1773,15 @@ async function onAuthSubmit(){
   }else{
     btn.textContent = 'Entrando...';
     try{
-      await auth.signInWithEmailAndPassword(email, senha);
+      await auth.signInWithEmailAndPassword(authEmail, senha);
     }catch(e){
-      errorEl.textContent = 'E-mail ou senha incorretos.';
+      if(e.code === 'auth/invalid-email'){
+        errorEl.textContent = idType==='cpf' ? 'CPF inválido.' : 'E-mail inválido.';
+      }else if(e.code === 'auth/network-request-failed'){
+        errorEl.textContent = 'Sem conexão com a internet. Verifique e tente de novo.';
+      }else{
+        errorEl.textContent = idType==='cpf' ? 'CPF ou senha incorretos.' : 'E-mail ou senha incorretos.';
+      }
     }finally{
       btn.disabled = false;
       btn.textContent = 'Entrar';
@@ -1733,6 +1821,8 @@ async function startApp(){
 
 document.getElementById('authSubmit').addEventListener('click', onAuthSubmit);
 document.getElementById('authPassword').addEventListener('keydown', (e)=>{ if(e.key==='Enter') onAuthSubmit(); });
+document.getElementById('idTypeEmailBtn').addEventListener('click', ()=>setIdType('email'));
+document.getElementById('idTypeCpfBtn').addEventListener('click', ()=>setIdType('cpf'));
 document.getElementById('authToggleLink').addEventListener('click', (e)=>{
   e.preventDefault();
   setAuthMode(authMode === 'login' ? 'signup' : 'login');
