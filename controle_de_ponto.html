@@ -437,6 +437,10 @@ tr:last-child td{border-bottom:none;}
         <span class="tot-label">Total trabalhado hoje</span>
         <span class="tot-value" id="totalHoje">—</span>
       </div>
+      <div class="summary" id="extraRow" style="display:none; border-color:var(--stamp-red);">
+        <span class="tot-label">Hora extra hoje (acima de 6h)</span>
+        <span class="tot-value" id="extraHoje" style="color:var(--stamp-red);">—</span>
+      </div>
 
       <div class="toolbar">
         <h2>Histórico</h2>
@@ -459,7 +463,7 @@ tr:last-child td{border-bottom:none;}
         <div class="table-wrap">
           <table>
             <thead>
-              <tr><th>Data</th><th>Entrada</th><th>S. Almoço</th><th>V. Almoço</th><th>Saída</th><th>Total</th><th></th></tr>
+              <tr><th>Data</th><th>Entrada</th><th>S. Almoço</th><th>V. Almoço</th><th>Saída</th><th>Total</th><th>Extra</th><th></th></tr>
             </thead>
             <tbody id="tbody"></tbody>
           </table>
@@ -468,7 +472,7 @@ tr:last-child td{border-bottom:none;}
     </div>
   </div>
 
-  <div class="footnote">Os dados ficam salvos automaticamente na sua conta. Ajustes de horário exigem senha.</div>
+  <div class="footnote">Os dados ficam salvos automaticamente na sua conta. Ajustes e exclusões exigem senha (ou digital/Face ID, se ativada).</div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -488,7 +492,7 @@ tr:last-child td{border-bottom:none;}
 <div class="modal-overlay" id="passwordOverlay">
   <div class="modal modal-wide">
     <h3>Senha necessária</h3>
-    <p class="hint-text">Digite sua senha para ajustar os horários.</p>
+    <p class="hint-text">Digite sua senha para ajustar ou excluir os horários.</p>
     <div class="field-row">
       <label for="passwordInput">Senha</label>
       <input type="password" id="passwordInput" autocomplete="off">
@@ -538,6 +542,12 @@ tr:last-child td{border-bottom:none;}
       <label for="setupAnswer">Resposta</label>
       <input type="text" id="setupAnswer" autocomplete="off">
     </div>
+    <div class="field-row" id="biometricRow" style="display:none;">
+      <label style="display:flex;align-items:center;gap:8px;font-family:'Inter',sans-serif;text-transform:none;letter-spacing:0;font-size:13px;color:var(--ink);">
+        <input type="checkbox" id="setupBiometric" style="width:auto;">
+        Usar digital / Face ID neste aparelho (se falhar, será pedida a senha)
+      </label>
+    </div>
     <div class="modal-actions">
       <button class="cancel" id="setupCancel">Cancelar</button>
       <button class="confirm" id="setupSave">Salvar</button>
@@ -549,14 +559,10 @@ tr:last-child td{border-bottom:none;}
 <div class="modal-overlay" id="payrollSetupOverlay">
   <div class="modal modal-wide">
     <h3>Configurar remuneração</h3>
-    <p class="hint-text">Preencha uma vez. Uso isso pra somar seu pagamento no fechamento do mês. Como é estágio, não desconto INSS nem FGTS.</p>
+    <p class="hint-text">Preencha uma vez. Os dias úteis do mês (segunda a sexta) são calculados automaticamente pelo calendário. Como é estágio, não desconto INSS nem FGTS.</p>
     <div class="field-row">
       <label for="pSalario">Salário mensal (R$)</label>
       <input type="number" step="0.01" min="0" id="pSalario" placeholder="Ex.: 1500.00">
-    </div>
-    <div class="field-row">
-      <label for="pDias">Dias úteis previstos no mês</label>
-      <input type="number" step="1" min="1" id="pDias" placeholder="Ex.: 22">
     </div>
     <div class="field-row">
       <label for="pVA">Vale Alimentação por dia trabalhado (R$)</label>
@@ -609,6 +615,12 @@ tr:last-child td{border-bottom:none;}
       <label for="editSaida">Saída</label>
       <input type="time" id="editSaida">
     </div>
+    <div class="field-row" style="margin-bottom:6px;">
+      <label style="display:flex;align-items:center;gap:8px;font-family:'Inter',sans-serif;text-transform:none;letter-spacing:0;font-size:13px;color:var(--ink);">
+        <input type="checkbox" id="editFalta" style="width:auto;">
+        Marcar como falta (dia não trabalhado, sem horários)
+      </label>
+    </div>
     <div class="modal-actions">
       <button class="cancel" id="editCancel">Cancelar</button>
       <button class="confirm" id="editSave">Salvar</button>
@@ -624,7 +636,7 @@ const TIPOS = ['entrada','almocoSaida','almocoVolta','saida'];
 const LABELS = {entrada:'Entrada', almocoSaida:'Saída Almoço', almocoVolta:'Volta Almoço', saida:'Saída'};
 let records = {};
 let security = null; // {passwordHash, question, answerHash}
-let payroll = null; // {salario, diasPrevistos, va, vc}
+let payroll = null; // {salario, va, vc} — dias úteis são calculados automaticamente pelo calendário
 let viewMonth = null; // 'YYYY-MM'
 let pendingAction = null; // 'edit' | 'changePassword'
 let pendingEditDate = null;
@@ -666,13 +678,21 @@ function formatBRL(n){
   return 'R$ ' + n.toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
 }
 
+const LIMITE_NORMAL_MIN = 6*60; // 6 horas: acima disso vira hora extra
+
 function timeToMinutes(t){
   if(!t) return null;
   const [h,m] = t.split(':').map(Number);
   return h*60+m;
 }
+function formatMinutes(mins){
+  const h = Math.floor(mins/60);
+  const mm = mins%60;
+  return `${h}h${pad(mm)}`;
+}
 function calcTotal(rec){
   if(!rec) return null;
+  if(rec.falta) return {falta:true, text:'Falta', mins:0, complete:true, extraMins:0, normalMins:0};
   const e = timeToMinutes(rec.entrada);
   const as = timeToMinutes(rec.almocoSaida);
   const av = timeToMinutes(rec.almocoVolta);
@@ -682,9 +702,9 @@ function calcTotal(rec){
   if(e!==null && as!==null){ mins += (as-e); } else complete = false;
   if(av!==null && s!==null){ mins += (s-av); } else complete = false;
   if(mins<=0 && !complete) return null;
-  const h = Math.floor(mins/60);
-  const mm = mins%60;
-  return {text:`${h}h${pad(mm)}`, mins, complete};
+  const extraMins = mins > LIMITE_NORMAL_MIN ? mins - LIMITE_NORMAL_MIN : 0;
+  const normalMins = mins - extraMins;
+  return {text:formatMinutes(mins), mins, complete, extraMins, normalMins};
 }
 
 // --- hashing simples (SHA-256) para não guardar senha em texto puro ---
@@ -692,6 +712,62 @@ async function hashText(text){
   const enc = new TextEncoder().encode('ponto-app::'+text);
   const buf = await crypto.subtle.digest('SHA-256', enc);
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+// --- digital / Face ID (WebAuthn), com fallback automático para senha ---
+function supportsWebAuthn(){
+  return !!(window.PublicKeyCredential && navigator.credentials && navigator.credentials.create);
+}
+function randomBytes(len){
+  const arr = new Uint8Array(len);
+  crypto.getRandomValues(arr);
+  return arr;
+}
+function bufToBase64(buf){
+  return btoa(String.fromCharCode(...new Uint8Array(buf)));
+}
+function base64ToBuf(b64){
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+  return bytes.buffer;
+}
+async function registerBiometric(){
+  if(!supportsWebAuthn()) return null;
+  try{
+    const cred = await navigator.credentials.create({
+      publicKey:{
+        challenge: randomBytes(32),
+        rp:{ name:'Controle de Ponto' },
+        user:{ id: randomBytes(16), name:'usuario-ponto', displayName:'Usuário' },
+        pubKeyCredParams:[{type:'public-key', alg:-7},{type:'public-key', alg:-257}],
+        authenticatorSelection:{ authenticatorAttachment:'platform', userVerification:'required' },
+        timeout:60000,
+        attestation:'none'
+      }
+    });
+    if(!cred) return null;
+    return bufToBase64(cred.rawId);
+  }catch(e){
+    return null;
+  }
+}
+async function verifyBiometric(){
+  if(!security || !security.biometricEnabled || !security.biometricCredentialId) return false;
+  if(!supportsWebAuthn()) return false;
+  try{
+    const assertion = await navigator.credentials.get({
+      publicKey:{
+        challenge: randomBytes(32),
+        allowCredentials:[{ id: base64ToBuf(security.biometricCredentialId), type:'public-key' }],
+        userVerification:'required',
+        timeout:60000
+      }
+    });
+    return !!assertion;
+  }catch(e){
+    return false;
+  }
 }
 
 // --- camada de armazenamento: usa a nuvem do Claude quando disponível,
@@ -811,6 +887,10 @@ async function registrar(tipo){
 async function handlePunch(){
   const key = todayKey();
   const rec = records[key] || {entrada:null, almocoSaida:null, almocoVolta:null, saida:null};
+  if(rec.falta){
+    showToast('Hoje está marcado como falta. Edite o dia (senha) para desmarcar.');
+    return;
+  }
   const tipo = nextPendingTipo(rec);
   if(!tipo){
     showToast('Todas as batidas de hoje já foram feitas. Use "Editar horários" para ajustar.');
@@ -821,9 +901,15 @@ async function handlePunch(){
 
 function updatePunchButton(){
   const rec = records[todayKey()] || {};
-  const tipo = nextPendingTipo(rec);
   const btn = document.getElementById('punchBtn');
   const sub = document.getElementById('punchBtnSub');
+  if(rec.falta){
+    btn.disabled = true;
+    btn.firstChild.textContent = 'Falta registrada hoje';
+    sub.textContent = 'Edite o dia (senha) para desmarcar';
+    return;
+  }
+  const tipo = nextPendingTipo(rec);
   if(!tipo){
     btn.disabled = true;
     btn.firstChild.textContent = 'Dia completo ✓';
@@ -851,7 +937,14 @@ function renderToday(){
     }
   });
   const tot = calcTotal(rec);
-  document.getElementById('totalHoje').textContent = tot ? tot.text + (tot.complete?'':' (parcial)') : '—';
+  document.getElementById('totalHoje').textContent = tot ? (tot.falta ? 'Falta registrada' : tot.text + (tot.complete?'':' (parcial)')) : '—';
+  const extraRow = document.getElementById('extraRow');
+  if(tot && !tot.falta && tot.extraMins>0){
+    extraRow.style.display='flex';
+    document.getElementById('extraHoje').textContent = formatMinutes(tot.extraMins);
+  }else{
+    extraRow.style.display='none';
+  }
   updatePunchButton();
 }
 
@@ -889,6 +982,15 @@ function openSetup(mode){
   document.getElementById('setupPasswordConfirm').value = '';
   document.getElementById('setupQuestion').value = security ? (security.question||'') : '';
   document.getElementById('setupAnswer').value = '';
+  const bioRow = document.getElementById('biometricRow');
+  const bioCheckbox = document.getElementById('setupBiometric');
+  if(supportsWebAuthn()){
+    bioRow.style.display = 'block';
+    bioCheckbox.checked = !!(security && security.biometricEnabled);
+  }else{
+    bioRow.style.display = 'none';
+    bioCheckbox.checked = false;
+  }
   document.getElementById('setupOverlay').classList.add('show');
 }
 function closeSetup(){
@@ -902,7 +1004,42 @@ function requestPasswordThen(action, dateKey){
     openSetup('initial');
     return;
   }
+  attemptBiometricThenPassword();
+}
+
+async function attemptBiometricThenPassword(){
+  if(security.biometricEnabled && security.biometricCredentialId && supportsWebAuthn()){
+    const ok = await verifyBiometric();
+    if(ok){
+      proceedPendingAction();
+      return;
+    }
+    showToast('Digital não reconhecida. Digite sua senha.');
+  }
   openPasswordPrompt();
+}
+
+function proceedPendingAction(){
+  const action = pendingAction;
+  const dateKey = pendingEditDate || todayKey();
+  pendingAction = null;
+  pendingEditDate = null;
+  if(action === 'edit'){
+    openEditModal(dateKey);
+  }else if(action === 'changePassword'){
+    openSetup('change');
+  }else if(action === 'delete'){
+    confirmDelete(dateKey);
+  }
+}
+
+async function confirmDelete(key){
+  const ok = await askConfirm(`Excluir todos os registros de ${displayDateShort(key)}?`);
+  if(!ok) return;
+  delete records[key];
+  await saveRecords();
+  renderToday();
+  renderHistory();
 }
 
 async function onPasswordConfirm(){
@@ -914,11 +1051,7 @@ async function onPasswordConfirm(){
     return;
   }
   closePasswordPrompt();
-  if(pendingAction === 'edit'){
-    openEditModal(pendingEditDate || todayKey());
-  }else if(pendingAction === 'changePassword'){
-    openSetup('change');
-  }
+  proceedPendingAction();
 }
 
 async function onForgotVerify(){
@@ -943,14 +1076,29 @@ async function onSetupSave(){
   if(!question || !answer){ showToast('Preencha a pergunta e a resposta de segurança.'); return; }
   const passwordHash = await hashText(p1);
   const answerHash = await hashText(answer.toLowerCase());
-  await saveSecurity({passwordHash, question, answerHash});
+
+  const wantsBiometric = document.getElementById('setupBiometric').checked;
+  let biometricEnabled = false;
+  let biometricCredentialId = security ? security.biometricCredentialId||null : null;
+  if(wantsBiometric && supportsWebAuthn()){
+    const credId = await registerBiometric();
+    if(credId){
+      biometricEnabled = true;
+      biometricCredentialId = credId;
+    }else{
+      showToast('Não foi possível ativar a digital. Senha salva normalmente.');
+    }
+  }
+
+  await saveSecurity({passwordHash, question, answerHash, biometricEnabled, biometricCredentialId});
   closeSetup();
   showToast('Senha salva com sucesso.');
-  if(pendingAction === 'edit'){
-    openEditModal(pendingEditDate || todayKey());
+  if(pendingAction === 'edit' || pendingAction === 'delete'){
+    proceedPendingAction();
+  }else{
+    pendingAction = null;
+    pendingEditDate = null;
   }
-  pendingAction = null;
-  pendingEditDate = null;
 }
 
 // --- edição manual ---
@@ -962,10 +1110,18 @@ function openEditModal(dateKey){
   document.getElementById('editAlmocoSaida').value = (rec.almocoSaida||'').slice(0,5);
   document.getElementById('editAlmocoVolta').value = (rec.almocoVolta||'').slice(0,5);
   document.getElementById('editSaida').value = (rec.saida||'').slice(0,5);
+  document.getElementById('editFalta').checked = !!rec.falta;
+  toggleEditFaltaFields();
   document.getElementById('editModalOverlay').classList.add('show');
 }
 function closeEditModal(){
   document.getElementById('editModalOverlay').classList.remove('show');
+}
+function toggleEditFaltaFields(){
+  const disabled = document.getElementById('editFalta').checked;
+  ['editEntrada','editAlmocoSaida','editAlmocoVolta','editSaida'].forEach(id=>{
+    document.getElementById(id).disabled = disabled;
+  });
 }
 function loadRecordIntoEditForm(key){
   const rec = records[key] || {entrada:null, almocoSaida:null, almocoVolta:null, saida:null};
@@ -973,30 +1129,36 @@ function loadRecordIntoEditForm(key){
   document.getElementById('editAlmocoSaida').value = (rec.almocoSaida||'').slice(0,5);
   document.getElementById('editAlmocoVolta').value = (rec.almocoVolta||'').slice(0,5);
   document.getElementById('editSaida').value = (rec.saida||'').slice(0,5);
+  document.getElementById('editFalta').checked = !!rec.falta;
+  toggleEditFaltaFields();
 }
 async function saveManualEdit(){
   const key = document.getElementById('editDate').value;
   if(!key){ showToast('Selecione uma data válida.'); return; }
-  const vals = {
-    entrada: document.getElementById('editEntrada').value,
-    almocoSaida: document.getElementById('editAlmocoSaida').value,
-    almocoVolta: document.getElementById('editAlmocoVolta').value,
-    saida: document.getElementById('editSaida').value,
-  };
-  const rec = {};
-  TIPOS.forEach(t=>{ rec[t] = vals[t] ? vals[t]+':00' : null; });
-  records[key] = rec;
+  const falta = document.getElementById('editFalta').checked;
+  if(falta){
+    records[key] = {entrada:null, almocoSaida:null, almocoVolta:null, saida:null, falta:true};
+  }else{
+    const vals = {
+      entrada: document.getElementById('editEntrada').value,
+      almocoSaida: document.getElementById('editAlmocoSaida').value,
+      almocoVolta: document.getElementById('editAlmocoVolta').value,
+      saida: document.getElementById('editSaida').value,
+    };
+    const rec = {falta:false};
+    TIPOS.forEach(t=>{ rec[t] = vals[t] ? vals[t]+':00' : null; });
+    records[key] = rec;
+  }
   await saveRecords();
   renderToday();
   renderHistory();
   closeEditModal();
-  showToast(`Horários de ${displayDateShort(key)} salvos.`);
+  showToast(falta ? `Falta registrada em ${displayDateShort(key)}.` : `Horários de ${displayDateShort(key)} salvos.`);
 }
 
 // --- fechamento do mês / remuneração ---
 function openPayrollSetup(){
   document.getElementById('pSalario').value = payroll ? payroll.salario : '';
-  document.getElementById('pDias').value = payroll ? payroll.diasPrevistos : '';
   document.getElementById('pVA').value = payroll ? payroll.va : '';
   document.getElementById('pVC').value = payroll ? payroll.vc : '';
   document.getElementById('payrollSetupOverlay').classList.add('show');
@@ -1006,39 +1168,62 @@ function closePayrollSetup(){
 }
 async function onPayrollSetupSave(){
   const salario = parseFloat(document.getElementById('pSalario').value);
-  const diasPrevistos = parseInt(document.getElementById('pDias').value, 10);
   const va = parseFloat(document.getElementById('pVA').value) || 0;
   const vc = parseFloat(document.getElementById('pVC').value) || 0;
   if(!salario || salario<=0){ showToast('Informe um salário válido.'); return; }
-  if(!diasPrevistos || diasPrevistos<=0){ showToast('Informe os dias úteis previstos no mês.'); return; }
-  await savePayroll({salario, diasPrevistos, va, vc});
+  await savePayroll({salario, va, vc});
   closePayrollSetup();
   showToast('Dados de remuneração salvos.');
   openPayrollSummary();
 }
 
 function diasTrabalhadosNoMes(mk){
-  return Object.keys(records).filter(k=>monthKeyOf(k)===mk && records[k] && records[k].entrada).length;
+  return Object.keys(records).filter(k=>monthKeyOf(k)===mk && records[k] && records[k].entrada && !records[k].falta).length;
+}
+function diasUteisNoMes(mk){
+  const [y,m] = mk.split('-').map(Number);
+  const diasNoMes = new Date(y, m, 0).getDate();
+  let count = 0;
+  for(let d=1; d<=diasNoMes; d++){
+    const dow = new Date(y, m-1, d).getDay(); // 0=domingo ... 6=sábado
+    if(dow>=1 && dow<=5) count++;
+  }
+  return count;
+}
+function faltasNoMes(mk){
+  return Object.keys(records).filter(k=>monthKeyOf(k)===mk && records[k] && records[k].falta).length;
 }
 
 function openPayrollSummary(){
   if(!payroll){ openPayrollSetup(); return; }
   const mk = viewMonth;
+  const diasUteis = diasUteisNoMes(mk);
   const dias = diasTrabalhadosNoMes(mk);
-  const diaValor = payroll.salario / payroll.diasPrevistos;
+  const faltas = faltasNoMes(mk);
+  const diaValor = payroll.salario / diasUteis;
   let salarioMes = diaValor * dias;
-  if(dias >= payroll.diasPrevistos) salarioMes = payroll.salario;
+  if(dias >= diasUteis) salarioMes = payroll.salario;
   const vaMes = payroll.va * dias;
   const vcMes = payroll.vc * dias;
   const totalMes = salarioMes + vaMes + vcMes;
 
+  let extraMesMins = 0;
+  Object.keys(records).filter(k=>monthKeyOf(k)===mk).forEach(k=>{
+    const t = calcTotal(records[k]);
+    if(t && !t.falta) extraMesMins += t.extraMins;
+  });
+
   document.getElementById('payrollTitle').textContent = `Fechamento — ${monthLabelOf(mk)}`;
   document.getElementById('payrollReceipt').innerHTML = `
-    <div class="receipt-row"><span class="r-label">Dias trabalhados</span><span class="r-value">${dias} de ${payroll.diasPrevistos}</span></div>
+    <div class="receipt-row"><span class="r-label">Dias úteis no mês (seg. a sex.)</span><span class="r-value">${diasUteis}</span></div>
+    <div class="receipt-row"><span class="r-label">Dias trabalhados</span><span class="r-value">${dias} de ${diasUteis}</span></div>
+    <div class="receipt-row"><span class="r-label">Faltas registradas</span><span class="r-value">${faltas}</span></div>
     <div class="receipt-row"><span class="r-label">Salário (proporcional)</span><span class="r-value">${formatBRL(salarioMes)}</span></div>
     <div class="receipt-row"><span class="r-label">Vale Alimentação</span><span class="r-value">${formatBRL(vaMes)}</span></div>
     <div class="receipt-row"><span class="r-label">Vale Combustível</span><span class="r-value">${formatBRL(vcMes)}</span></div>
     <div class="receipt-row total"><span class="r-label">Total do mês</span><span class="r-value">${formatBRL(totalMes)}</span></div>
+    ${extraMesMins>0 ? `<div class="receipt-row"><span class="r-label">Hora extra no mês</span><span class="r-value" style="color:var(--stamp-red);">${formatMinutes(extraMesMins)}</span></div>` : ''}
+    <div class="receipt-note">Dias úteis calculados automaticamente pelo calendário (segunda a sexta). Hora extra é apenas informativa: não entra na conta do salário, pois não é remunerada.</div>
   `;
   document.getElementById('payrollOverlay').classList.add('show');
 }
@@ -1064,22 +1249,37 @@ function renderHistory(){
   const keys = Object.keys(records).filter(k=>monthKeyOf(k)===viewMonth).sort().reverse();
 
   let totalMins = 0;
+  let totalExtraMins = 0;
   keys.forEach(k=>{
     const tot = calcTotal(records[k]);
-    if(tot) totalMins += tot.mins;
+    if(tot && !tot.falta){ totalMins += tot.mins; totalExtraMins += tot.extraMins; }
   });
   const th = Math.floor(totalMins/60), tm = totalMins%60;
   document.getElementById('monthTotal').textContent = keys.length
-    ? `${keys.length} dia(s) · total ${th}h${pad(tm)}`
+    ? `${keys.length} dia(s) · total ${th}h${pad(tm)}` + (totalExtraMins>0 ? ` · extra ${formatMinutes(totalExtraMins)}` : '')
     : 'nenhum registro neste mês';
 
   if(keys.length===0){
-    tbody.innerHTML = '<tr class="empty-row"><td colspan="7">Nenhum registro neste mês.</td></tr>';
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="8">Nenhum registro neste mês.</td></tr>';
     return;
   }
   tbody.innerHTML = keys.map(key=>{
     const rec = records[key];
     const tot = calcTotal(rec);
+    if(tot && tot.falta){
+      return `<tr>
+        <td>${displayDateShort(key)}</td>
+        <td colspan="4" style="text-align:center;color:var(--stamp-red);font-weight:700;letter-spacing:1px;">FALTA</td>
+        <td>—</td>
+        <td>—</td>
+        <td>
+          <div class="row-actions">
+            <button class="icon-btn edit" data-key="${key}" title="Editar (senha)">✎</button>
+            <button class="icon-btn del" data-key="${key}" title="Excluir dia (senha)">✕</button>
+          </div>
+        </td>
+      </tr>`;
+    }
     return `<tr>
       <td>${displayDateShort(key)}</td>
       <td>${rec.entrada||'—'}</td>
@@ -1087,10 +1287,11 @@ function renderHistory(){
       <td>${rec.almocoVolta||'—'}</td>
       <td>${rec.saida||'—'}</td>
       <td>${tot?tot.text:'—'}</td>
+      <td>${tot && tot.extraMins>0 ? formatMinutes(tot.extraMins) : '—'}</td>
       <td>
         <div class="row-actions">
           <button class="icon-btn edit" data-key="${key}" title="Editar (senha)">✎</button>
-          <button class="icon-btn del" data-key="${key}" title="Excluir dia">✕</button>
+          <button class="icon-btn del" data-key="${key}" title="Excluir dia (senha)">✕</button>
         </div>
       </td>
     </tr>`;
@@ -1101,13 +1302,8 @@ function renderHistory(){
     });
   });
   tbody.querySelectorAll('.icon-btn.del').forEach(btn=>{
-    btn.addEventListener('click', async ()=>{
-      const ok = await askConfirm(`Excluir todos os registros de ${displayDateShort(btn.dataset.key)}?`);
-      if(!ok) return;
-      delete records[btn.dataset.key];
-      await saveRecords();
-      renderToday();
-      renderHistory();
+    btn.addEventListener('click', ()=>{
+      requestPasswordThen('delete', btn.dataset.key);
     });
   });
 }
@@ -1119,11 +1315,15 @@ function tickClock(){
 function exportCSV(){
   const keys = Object.keys(records).sort();
   if(keys.length===0){ showToast('Não há registros para exportar.'); return; }
-  let csv = 'Funcionario;Márcio Josoel do Nascimento Gonçalves\n\nData;Entrada;Saida Almoco;Volta Almoco;Saida;Total\n';
+  let csv = 'Funcionario;Márcio Josoel do Nascimento Gonçalves\n\nData;Entrada;Saida Almoco;Volta Almoco;Saida;Total;Hora Extra (acima de 6h);Falta\n';
   keys.forEach(key=>{
     const rec = records[key];
     const tot = calcTotal(rec);
-    csv += [displayDateShort(key), rec.entrada||'', rec.almocoSaida||'', rec.almocoVolta||'', rec.saida||'', tot?tot.text:''].join(';') + '\n';
+    if(tot && tot.falta){
+      csv += [displayDateShort(key), '', '', '', '', '', '', 'SIM'].join(';') + '\n';
+    }else{
+      csv += [displayDateShort(key), rec.entrada||'', rec.almocoSaida||'', rec.almocoVolta||'', rec.saida||'', tot?tot.text:'', tot && tot.extraMins>0 ? formatMinutes(tot.extraMins) : '', ''].join(';') + '\n';
+    }
   });
   const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8;'});
   const url = URL.createObjectURL(blob);
@@ -1151,6 +1351,7 @@ document.getElementById('setupSave').addEventListener('click', onSetupSave);
 document.getElementById('editCancel').addEventListener('click', closeEditModal);
 document.getElementById('editSave').addEventListener('click', saveManualEdit);
 document.getElementById('editDate').addEventListener('change', (e)=>loadRecordIntoEditForm(e.target.value));
+document.getElementById('editFalta').addEventListener('change', toggleEditFaltaFields);
 
 document.getElementById('exportBtn').addEventListener('click', exportCSV);
 
