@@ -36,6 +36,7 @@ body{
 .wrap{max-width:760px;margin:0 auto;}
 
 .header{
+  position:relative;
   text-align:center;
   margin-bottom:22px;
   color:var(--ink);
@@ -403,6 +404,54 @@ tr:last-child td{border-bottom:none;}
 }
 .fs-totals .extra{color:var(--stamp-red); font-weight:600;}
 .fs-empty{text-align:center; color:#888; font-family:'Inter',sans-serif; padding:30px 0;}
+
+.menu-btn{
+  position:absolute; top:16px; left:16px;
+  border:1.5px solid var(--ink); background:#fff; border-radius:4px;
+  width:38px; height:38px; font-size:18px; cursor:pointer; z-index:10;
+}
+.drawer-overlay{
+  position:fixed; inset:0; background:rgba(0,0,0,0.5);
+  display:none; z-index:90;
+}
+.drawer-overlay.show{display:block;}
+.drawer{
+  position:fixed; top:0; left:0; bottom:0; width:88%; max-width:320px;
+  background:#f4f1ea; border-right:2px solid var(--ink);
+  display:flex; flex-direction:column;
+  transform:translateX(-100%); transition:transform 0.2s ease;
+}
+.drawer-overlay.show .drawer{transform:translateX(0);}
+.drawer-header{
+  padding:18px 16px; border-bottom:2px solid var(--ink); background:#fff;
+  display:flex; justify-content:space-between; align-items:center;
+}
+.drawer-header h2{margin:0; font-family:'Space Grotesk',sans-serif; font-size:18px;}
+.drawer-close{border:1.5px solid var(--ink); background:#fff; border-radius:4px; width:32px; height:32px; font-size:16px; cursor:pointer;}
+.drawer-body{flex:1; overflow-y:auto; padding:8px 0;}
+.drawer-account{
+  padding:14px 16px; border-bottom:1px solid #ccc; background:#fff;
+}
+.drawer-account .acc-label{font-family:'Inter',sans-serif; font-size:11px; text-transform:uppercase; color:#888; letter-spacing:0.5px;}
+.drawer-account .acc-value{font-family:'Space Grotesk',sans-serif; font-size:14px; font-weight:600; word-break:break-all;}
+.drawer-section{padding:10px 16px 4px;}
+.drawer-section-title{
+  font-family:'Inter',sans-serif; font-size:11px; text-transform:uppercase;
+  letter-spacing:0.5px; color:#888; margin:10px 0 4px;
+}
+.drawer-item{
+  display:flex; align-items:center; gap:10px; width:100%;
+  padding:11px 8px; border:none; background:none; text-align:left;
+  font-family:'Inter',sans-serif; font-size:14.5px; color:var(--ink);
+  cursor:pointer; border-radius:4px;
+}
+.drawer-item:active{background:#e8e4da;}
+.drawer-item .ic{width:20px; text-align:center; flex-shrink:0;}
+.drawer-footer{
+  border-top:2px solid var(--ink); padding:8px 8px calc(8px + env(safe-area-inset-bottom));
+  background:#fff;
+}
+.drawer-item.danger{color:var(--stamp-red);}
 .modal-wide h3{
   font-family:'Oswald',sans-serif; font-size:16px; text-transform:uppercase;
   letter-spacing:1px; margin:0 0 14px; color:var(--ink);
@@ -461,13 +510,50 @@ tr:last-child td{border-bottom:none;}
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
 </head>
 <body>
+<div class="drawer-overlay" id="drawerOverlay">
+  <div class="drawer">
+    <div class="drawer-header">
+      <h2>Menu</h2>
+      <button class="drawer-close" id="drawerCloseBtn" aria-label="Fechar menu">✕</button>
+    </div>
+    <div class="drawer-body">
+      <div class="drawer-account">
+        <div class="acc-label">Conta</div>
+        <div class="acc-value" id="drawerAccountEmail">—</div>
+      </div>
+
+      <div class="drawer-section">
+        <div class="drawer-section-title">Perfil</div>
+        <button class="drawer-item" id="menuEditNameBtn"><span class="ic">👤</span> Editar informações pessoais</button>
+        <button class="drawer-item" id="menuPasswordBtn"><span class="ic">🔒</span> Senha de edição/exclusão</button>
+      </div>
+
+      <div class="drawer-section">
+        <div class="drawer-section-title">Remuneração</div>
+        <button class="drawer-item" id="menuPayrollSetupBtn"><span class="ic">💰</span> Configurar remuneração</button>
+        <button class="drawer-item" id="menuPayrollSummaryBtn"><span class="ic">📊</span> Ver fechamento do mês</button>
+      </div>
+
+      <div class="drawer-section">
+        <div class="drawer-section-title">Exportar</div>
+        <button class="drawer-item" id="menuExportCsvBtn"><span class="ic">🗂️</span> Exportar pontos (CSV)</button>
+        <button class="drawer-item" id="menuExportA4Btn"><span class="ic">📄</span> Exportar folha A4 (imprimir/PDF)</button>
+        <button class="drawer-item" id="menuExportExcelBtn"><span class="ic">📊</span> Exportar Excel</button>
+      </div>
+    </div>
+    <div class="drawer-footer">
+      <button class="drawer-item" id="menuLogoutBtn"><span class="ic">🚪</span> Sair</button>
+      <button class="drawer-item danger" id="menuSwitchAccountBtn"><span class="ic">🔁</span> Entrar em outra conta</button>
+    </div>
+  </div>
+</div>
+
 <div class="wrap">
   <div class="header">
+    <button class="menu-btn" id="menuBtn" aria-label="Abrir menu">☰</button>
     <div class="eyebrow">Cartão de ponto digital</div>
     <h1>Controle de Ponto</h1>
     <div class="employee-name" id="employeeName">—</div>
-    <button class="link-btn" id="editNameLink" style="margin-top:4px;">Editar nome</button>
-    <button class="link-btn" id="logoutBtn" style="margin-top:4px;">Sair</button>
   </div>
 
   <div class="card">
@@ -491,7 +577,6 @@ tr:last-child td{border-bottom:none;}
 
       <div class="btn-row">
         <button class="edit-btn" id="editManualBtn">✎ Editar horários (protegido por senha)</button>
-        <button class="security-btn" id="securityBtn">🔒 Alterar senha</button>
       </div>
 
       <div class="summary">
@@ -508,8 +593,6 @@ tr:last-child td{border-bottom:none;}
         <div class="toolbar-actions">
           <button class="days-btn" id="daysBtn">Ver dias trabalhados</button>
           <button class="export-btn" id="fullscreenBtn">🔍 Tela cheia</button>
-          <button class="export-btn" id="payrollBtn">💰 Fechar mês</button>
-          <button class="export-btn" id="exportBtn">Exportar CSV</button>
         </div>
       </div>
 
@@ -1049,6 +1132,42 @@ function showToast(msg, duration){
   showToast._tm = setTimeout(()=>t.classList.remove('show'), duration || 2200);
 }
 
+// Rede de segurança: se algo quebrar em qualquer lugar do app, isso é
+// capturado aqui em vez de travar tudo silenciosamente sem explicação.
+let lastGlobalErrorToast = 0;
+function notifyUnexpectedError(){
+  const now = Date.now();
+  if(now - lastGlobalErrorToast > 4000){
+    lastGlobalErrorToast = now;
+    showToast('Ocorreu um erro inesperado. Se a tela não responder, feche e abra o app de novo.', 4000);
+  }
+}
+window.addEventListener('error', (e)=>{
+  console.error('Erro:', e.error || e.message);
+  notifyUnexpectedError();
+});
+window.addEventListener('unhandledrejection', (e)=>{
+  console.error('Erro assíncrono:', e.reason);
+  notifyUnexpectedError();
+});
+// Liga um evento a um elemento sem deixar que um erro dentro do handler
+// (ou um id que não existe) interrompa o resto dos listeners do app.
+function on(id, event, handler){
+  const el = document.getElementById(id);
+  if(!el){ console.warn('Elemento não encontrado para listener:', id); return; }
+  el.addEventListener(event, (e)=>{
+    try{
+      const result = handler(e);
+      if(result && typeof result.catch === 'function'){
+        result.catch(err=>{ console.error('Erro em', id, err); notifyUnexpectedError(); });
+      }
+    }catch(err){
+      console.error('Erro em', id, err);
+      notifyUnexpectedError();
+    }
+  });
+}
+
 function askConfirm(text){
   return new Promise(resolve=>{
     const overlay = document.getElementById('modalOverlay');
@@ -1582,6 +1701,117 @@ function tickClock(){
   document.getElementById('clock').textContent = nowTime();
 }
 
+function authEmailToDisplay(email){
+  if(!email) return '—';
+  const m = email.match(/^cpf(\d{11})@pontoapp\.local$/);
+  if(m){
+    const d = m[1];
+    return `${d.slice(0,3)}.${d.slice(3,6)}.${d.slice(6,9)}-${d.slice(9,11)} (CPF)`;
+  }
+  return email;
+}
+function openDrawer(){
+  const email = auth.currentUser ? auth.currentUser.email : '';
+  document.getElementById('drawerAccountEmail').textContent = authEmailToDisplay(email);
+  document.getElementById('drawerOverlay').classList.add('show');
+}
+function closeDrawer(){
+  document.getElementById('drawerOverlay').classList.remove('show');
+}
+
+function buildReportRows(){
+  const keys = Object.keys(records).sort();
+  return keys.map(key=>{
+    const rec = records[key];
+    const tot = calcTotal(rec);
+    return {key, rec, tot, isFalta: !!(tot && tot.falta)};
+  });
+}
+
+function exportA4(){
+  const rows = buildReportRows();
+  if(rows.length===0){ showToast('Não há registros para exportar.'); return; }
+  const nome = profile && profile.nome ? profile.nome : 'Não informado';
+  const win = window.open('', '_blank');
+  if(!win){ showToast('Permita pop-ups no navegador para exportar em A4.', 4000); return; }
+  const bodyRows = rows.map(({key, rec, tot, isFalta})=>{
+    if(isFalta){
+      return `<tr><td>${displayDateShort(key)}</td><td colspan="4" style="text-align:center;color:#b00020;font-weight:bold;">FALTA</td><td>—</td><td>—</td></tr>`;
+    }
+    return `<tr>
+      <td>${displayDateShort(key)}</td>
+      <td>${rec.entrada||'—'}</td>
+      <td>${rec.almocoSaida||'—'}</td>
+      <td>${rec.almocoVolta||'—'}</td>
+      <td>${rec.saida||'—'}</td>
+      <td>${tot?tot.text:'—'}</td>
+      <td>${tot && tot.extraMins>0 ? formatMinutes(tot.extraMins) : '—'}</td>
+    </tr>`;
+  }).join('');
+  win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Controle de Ponto</title>
+    <style>
+      @page{ size:A4; margin:16mm; }
+      body{ font-family:Arial, Helvetica, sans-serif; color:#111; margin:0; }
+      h1{ font-size:20px; margin:0 0 2px; }
+      .sub{ font-size:12px; color:#555; margin-bottom:18px; }
+      table{ width:100%; border-collapse:collapse; font-size:12px; }
+      th, td{ border:1px solid #999; padding:6px 8px; text-align:left; }
+      th{ background:#111; color:#fff; }
+      tr:nth-child(even){ background:#f5f5f5; }
+    </style></head><body>
+      <h1>Controle de Ponto — ${nome}</h1>
+      <div class="sub">Relatório gerado em ${new Date().toLocaleString('pt-BR')}</div>
+      <table>
+        <thead><tr><th>Data</th><th>Entrada</th><th>Saída Almoço</th><th>Volta Almoço</th><th>Saída</th><th>Total</th><th>Hora Extra</th></tr></thead>
+        <tbody>${bodyRows}</tbody>
+      </table>
+    </body></html>`);
+  win.document.close();
+  win.focus();
+  setTimeout(()=>{ try{ win.print(); }catch(e){ /* usuário pode imprimir manualmente */ } }, 300);
+}
+
+function exportExcel(){
+  const rows = buildReportRows();
+  if(rows.length===0){ showToast('Não há registros para exportar.'); return; }
+  const nome = profile && profile.nome ? profile.nome : 'Não informado';
+  const bodyRows = rows.map(({key, rec, tot, isFalta})=>{
+    if(isFalta){
+      return `<tr><td>${displayDateShort(key)}</td><td colspan="4" style="text-align:center;color:#b00020;font-weight:bold;">FALTA</td><td></td><td></td></tr>`;
+    }
+    return `<tr>
+      <td>${displayDateShort(key)}</td>
+      <td>${rec.entrada||''}</td>
+      <td>${rec.almocoSaida||''}</td>
+      <td>${rec.almocoVolta||''}</td>
+      <td>${rec.saida||''}</td>
+      <td>${tot?tot.text:''}</td>
+      <td>${tot && tot.extraMins>0 ? formatMinutes(tot.extraMins) : ''}</td>
+    </tr>`;
+  }).join('');
+  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+    <head><meta charset="UTF-8"></head><body>
+      <table border="1">
+        <tr><td colspan="7" style="font-weight:bold;">Funcionário</td></tr>
+        <tr><td colspan="7">${nome}</td></tr>
+        <tr><td colspan="7"></td></tr>
+        <tr style="background:#111;color:#fff;font-weight:bold;">
+          <td>Data</td><td>Entrada</td><td>Saída Almoço</td><td>Volta Almoço</td><td>Saída</td><td>Total</td><td>Hora Extra</td>
+        </tr>
+        ${bodyRows}
+      </table>
+    </body></html>`;
+  const blob = new Blob(['\uFEFF'+html], {type:'application/vnd.ms-excel;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'controle_de_ponto.xls';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 function exportCSV(){
   const keys = Object.keys(records).sort();
   if(keys.length===0){ showToast('Não há registros para exportar.'); return; }
@@ -1606,33 +1836,42 @@ function exportCSV(){
   URL.revokeObjectURL(url);
 }
 
-document.getElementById('punchBtn').addEventListener('click', handlePunch);
-document.getElementById('editManualBtn').addEventListener('click', ()=>requestPasswordThen('edit', todayKey()));
-document.getElementById('securityBtn').addEventListener('click', ()=>requestPasswordThen('changePassword'));
-document.getElementById('editNameLink').addEventListener('click', openNamePrompt);
-document.getElementById('nameCancel').addEventListener('click', closeNamePrompt);
-document.getElementById('nameSave').addEventListener('click', onNameSave);
+on('punchBtn', 'click', handlePunch);
+on('editManualBtn', 'click', ()=>requestPasswordThen('edit', todayKey()));
+on('nameCancel', 'click', closeNamePrompt);
+on('nameSave', 'click', onNameSave);
 
-document.getElementById('passwordConfirm').addEventListener('click', onPasswordConfirm);
-document.getElementById('passwordCancel').addEventListener('click', closePasswordPrompt);
-document.getElementById('forgotPasswordLink').addEventListener('click', ()=>{ closePasswordPrompt(); openForgot(); });
-document.getElementById('forgotCancel').addEventListener('click', closeForgot);
-document.getElementById('forgotVerify').addEventListener('click', onForgotVerify);
-document.getElementById('setupCancel').addEventListener('click', ()=>{ closeSetup(); pendingAction=null; pendingEditDate=null; });
-document.getElementById('setupSave').addEventListener('click', onSetupSave);
+on('passwordConfirm', 'click', onPasswordConfirm);
+on('passwordCancel', 'click', closePasswordPrompt);
+on('forgotPasswordLink', 'click', ()=>{ closePasswordPrompt(); openForgot(); });
+on('forgotCancel', 'click', closeForgot);
+on('forgotVerify', 'click', onForgotVerify);
+on('setupCancel', 'click', ()=>{ closeSetup(); pendingAction=null; pendingEditDate=null; });
+on('setupSave', 'click', onSetupSave);
 
-document.getElementById('editCancel').addEventListener('click', closeEditModal);
-document.getElementById('editSave').addEventListener('click', saveManualEdit);
-document.getElementById('editDate').addEventListener('change', (e)=>loadRecordIntoEditForm(e.target.value));
-document.getElementById('editFalta').addEventListener('change', toggleEditFaltaFields);
+on('editCancel', 'click', closeEditModal);
+on('editSave', 'click', saveManualEdit);
+on('editDate', 'change', (e)=>loadRecordIntoEditForm(e.target.value));
+on('editFalta', 'change', toggleEditFaltaFields);
 
-document.getElementById('exportBtn').addEventListener('click', exportCSV);
+on('payrollSetupCancel', 'click', closePayrollSetup);
+on('payrollSetupSave', 'click', onPayrollSetupSave);
+on('payrollClose', 'click', closePayrollSummary);
+on('payrollEditData', 'click', ()=>{ closePayrollSummary(); openPayrollSetup(); });
 
-document.getElementById('payrollBtn').addEventListener('click', openPayrollSummary);
-document.getElementById('payrollSetupCancel').addEventListener('click', closePayrollSetup);
-document.getElementById('payrollSetupSave').addEventListener('click', onPayrollSetupSave);
-document.getElementById('payrollClose').addEventListener('click', closePayrollSummary);
-document.getElementById('payrollEditData').addEventListener('click', ()=>{ closePayrollSummary(); openPayrollSetup(); });
+// --- menu lateral (☰) ---
+on('menuBtn', 'click', openDrawer);
+on('drawerCloseBtn', 'click', closeDrawer);
+on('drawerOverlay', 'click', (e)=>{ if(e.target.id==='drawerOverlay') closeDrawer(); });
+on('menuEditNameBtn', 'click', ()=>{ closeDrawer(); openNamePrompt(); });
+on('menuPasswordBtn', 'click', ()=>{ closeDrawer(); requestPasswordThen('changePassword'); });
+on('menuPayrollSetupBtn', 'click', ()=>{ closeDrawer(); openPayrollSetup(); });
+on('menuPayrollSummaryBtn', 'click', ()=>{ closeDrawer(); openPayrollSummary(); });
+on('menuExportCsvBtn', 'click', ()=>{ closeDrawer(); exportCSV(); });
+on('menuExportA4Btn', 'click', ()=>{ closeDrawer(); exportA4(); });
+on('menuExportExcelBtn', 'click', ()=>{ closeDrawer(); exportExcel(); });
+on('menuLogoutBtn', 'click', ()=>{ closeDrawer(); onLogout(); });
+on('menuSwitchAccountBtn', 'click', ()=>{ closeDrawer(); onLogout(); });
 
 const daysBtn = document.getElementById('daysBtn');
 const daysPanel = document.getElementById('daysPanel');
@@ -1856,7 +2095,6 @@ document.getElementById('authToggleLink').addEventListener('click', (e)=>{
   e.preventDefault();
   setAuthMode(authMode === 'login' ? 'signup' : 'login');
 });
-document.getElementById('logoutBtn').addEventListener('click', onLogout);
 
 auth.onAuthStateChanged((user)=>{
   if(user){
