@@ -507,7 +507,6 @@ tr:last-child td{border-bottom:none;}
 </style>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
 </head>
 <body>
 <div class="drawer-overlay" id="drawerOverlay">
@@ -779,9 +778,9 @@ tr:last-child td{border-bottom:none;}
 
 <!-- configurar dados de remuneração -->
 <div class="modal-overlay" id="payrollSetupOverlay">
-  <div class="modal modal-wide">
+  <div class="modal modal-wide" style="max-height:85vh; overflow-y:auto;">
     <h3>Configurar remuneração</h3>
-    <p class="hint-text">Preencha uma vez. Os dias úteis do mês (segunda a sexta) são calculados automaticamente pelo calendário. Como é estágio, não desconto INSS nem FGTS.</p>
+    <p class="hint-text">Preencha uma vez. Os dias úteis do mês (segunda a sexta) são calculados automaticamente pelo calendário.</p>
     <div class="field-row">
       <label for="pSalario">Salário mensal (R$)</label>
       <input type="number" step="0.01" min="0" id="pSalario" placeholder="Ex.: 1500.00">
@@ -794,6 +793,34 @@ tr:last-child td{border-bottom:none;}
       <label for="pVC">Vale Combustível por dia trabalhado (R$)</label>
       <input type="number" step="0.01" min="0" id="pVC" placeholder="Ex.: 15.00">
     </div>
+
+    <div class="field-row" style="border-top:1.5px solid var(--line); padding-top:12px; margin-top:4px;">
+      <label style="display:flex;align-items:center;gap:8px;font-family:'Inter',sans-serif;text-transform:none;letter-spacing:0;font-size:13.5px;color:var(--ink);">
+        <input type="checkbox" id="pIsCLT" style="width:auto;">
+        Sou CLT (calcular INSS, FGTS e Vale Transporte)
+      </label>
+    </div>
+
+    <div id="cltFields" style="display:none;">
+      <p class="hint-text" style="margin-top:0;">O INSS é descontado do salário automaticamente pela tabela vigente. O FGTS é informativo (depositado pelo empregador, não sai do seu salário).</p>
+      <div class="field-row">
+        <label style="display:flex;align-items:center;gap:8px;font-family:'Inter',sans-serif;text-transform:none;letter-spacing:0;font-size:13.5px;color:var(--ink);">
+          <input type="checkbox" id="pVTAtivo" style="width:auto;">
+          Uso vale transporte
+        </label>
+      </div>
+      <div id="vtFields" style="display:none;">
+        <div class="field-row">
+          <label for="pVTValorDia">Valor do vale transporte por dia (R$)</label>
+          <input type="number" step="0.01" min="0" id="pVTValorDia" placeholder="Ex.: 8.80">
+        </div>
+        <div class="field-row">
+          <label for="pVTPercentual">Percentual descontado do salário (%)</label>
+          <input type="number" step="0.1" min="0" max="100" id="pVTPercentual" placeholder="Ex.: 6 (padrão legal é até 6%)">
+        </div>
+      </div>
+    </div>
+
     <div class="modal-actions">
       <button class="cancel" id="payrollSetupCancel">Cancelar</button>
       <button class="confirm" id="payrollSetupSave">Salvar</button>
@@ -863,7 +890,6 @@ const firebaseConfig = {
 };
 firebase.initializeApp(firebaseConfig);
 const auth = firebase.auth();
-const db = firebase.firestore();
 
 const STORAGE_KEY = 'ponto-records';
 const SECURITY_KEY = 'ponto-security';
@@ -1053,6 +1079,7 @@ async function storageGet(key){
     }
     const data = await res.json();
     const value = data.fields && data.fields.value && data.fields.value.stringValue;
+    if(value !== undefined) writeCache(key, value);
     return value !== undefined ? {value} : null;
   }catch(e){
     console.error('storageGet', e);
@@ -1089,11 +1116,44 @@ async function storageSet(key, value){
       lastStorageError = 'http ' + res.status + detail;
       return false;
     }
+    writeCache(key, value);
     return true;
   }catch(e){
     console.error('storageSet', e);
     lastStorageError = (e.message || 'erro desconhecido');
     return false;
+  }
+}
+
+// Cache local: guarda uma cópia de cada dado no próprio aparelho, pra
+// mostrar algo na tela IMEDIATAMENTE ao abrir o app, sem esperar a rede.
+// O Firestore continua sendo a fonte de verdade — assim que a resposta
+// do servidor chega, a tela é atualizada de novo com o valor mais recente.
+function cacheKeyFor(key){
+  return `ponto-cache:${currentUid()}:${key}`;
+}
+function readCache(key){
+  try{
+    return localStorage.getItem(cacheKeyFor(key));
+  }catch(e){
+    return null;
+  }
+}
+function writeCache(key, value){
+  try{
+    localStorage.setItem(cacheKeyFor(key), value);
+  }catch(e){
+    // armazenamento local cheio/indisponível — sem problema, é só um acelerador
+  }
+}
+function hydrateFromCache(){
+  try{
+    const r = readCache(STORAGE_KEY); if(r) records = JSON.parse(r);
+    const s = readCache(SECURITY_KEY); if(s) security = JSON.parse(s);
+    const p = readCache(PAYROLL_KEY); if(p) payroll = JSON.parse(p);
+    const pr = readCache(PROFILE_KEY); if(pr) profile = JSON.parse(pr);
+  }catch(e){
+    // cache corrompido — ignora e deixa a busca no servidor preencher tudo
   }
 }
 
@@ -1566,10 +1626,24 @@ async function saveManualEdit(){
 }
 
 // --- fechamento do mês / remuneração ---
+function toggleCLTFields(){
+  const isCLT = document.getElementById('pIsCLT').checked;
+  document.getElementById('cltFields').style.display = isCLT ? 'block' : 'none';
+}
+function toggleVTFields(){
+  const ativo = document.getElementById('pVTAtivo').checked;
+  document.getElementById('vtFields').style.display = ativo ? 'block' : 'none';
+}
 function openPayrollSetup(){
   document.getElementById('pSalario').value = payroll ? payroll.salario : '';
   document.getElementById('pVA').value = payroll ? payroll.va : '';
   document.getElementById('pVC').value = payroll ? payroll.vc : '';
+  document.getElementById('pIsCLT').checked = !!(payroll && payroll.isCLT);
+  document.getElementById('pVTAtivo').checked = !!(payroll && payroll.vtAtivo);
+  document.getElementById('pVTValorDia').value = payroll && payroll.vtValorDia ? payroll.vtValorDia : '';
+  document.getElementById('pVTPercentual').value = payroll && payroll.vtPercentual ? payroll.vtPercentual : '';
+  toggleCLTFields();
+  toggleVTFields();
   document.getElementById('payrollSetupOverlay').classList.add('show');
 }
 function closePayrollSetup(){
@@ -1579,17 +1653,49 @@ async function onPayrollSetupSave(){
   const salario = parseFloat(document.getElementById('pSalario').value);
   const va = parseFloat(document.getElementById('pVA').value) || 0;
   const vc = parseFloat(document.getElementById('pVC').value) || 0;
+  const isCLT = document.getElementById('pIsCLT').checked;
+  const vtAtivo = isCLT && document.getElementById('pVTAtivo').checked;
+  const vtValorDia = vtAtivo ? (parseFloat(document.getElementById('pVTValorDia').value) || 0) : 0;
+  const vtPercentual = vtAtivo ? (parseFloat(document.getElementById('pVTPercentual').value) || 0) : 0;
   if(!salario || salario<=0){ showToast('Informe um salário válido.'); return; }
+  if(vtAtivo && (!vtValorDia || !vtPercentual)){ showToast('Preencha o valor do vale transporte e o percentual descontado.'); return; }
   const btn = document.getElementById('payrollSetupSave');
   btn.disabled = true;
   btn.textContent = 'Salvando...';
-  const ok = await savePayroll({salario, va, vc});
+  const ok = await savePayroll({salario, va, vc, isCLT, vtAtivo, vtValorDia, vtPercentual});
   btn.disabled = false;
   btn.textContent = 'Salvar';
   if(!ok) return;
   closePayrollSetup();
   showToast('Dados de remuneração salvos.');
   openPayrollSummary();
+}
+
+// Tabela INSS 2026 (progressiva): faixa;alíquota
+function calcINSS(salarioBase){
+  const faixas = [
+    {ate: 1621.00, aliq: 0.075},
+    {ate: 2902.84, aliq: 0.09},
+    {ate: 4354.27, aliq: 0.12},
+    {ate: 8475.55, aliq: 0.14},
+  ];
+  const base = Math.min(salarioBase, 8475.55);
+  let total = 0, anterior = 0;
+  for(const f of faixas){
+    if(base > anterior){
+      const faixaValor = Math.min(base, f.ate) - anterior;
+      if(faixaValor > 0) total += faixaValor * f.aliq;
+      anterior = f.ate;
+    }else break;
+  }
+  return Math.round(total * 100) / 100;
+}
+function calcFGTS(salarioBase){
+  return Math.round(salarioBase * 0.08 * 100) / 100;
+}
+function calcDescontoVT(salarioBase, valorMesVT, percentual){
+  const limite = salarioBase * (percentual/100);
+  return Math.round(Math.min(limite, valorMesVT) * 100) / 100;
 }
 
 function diasTrabalhadosNoMes(mk){
@@ -1609,9 +1715,7 @@ function faltasNoMes(mk){
   return Object.keys(records).filter(k=>monthKeyOf(k)===mk && records[k] && records[k].falta).length;
 }
 
-function openPayrollSummary(){
-  if(!payroll){ openPayrollSetup(); return; }
-  const mk = viewMonth;
+function computePayrollBreakdown(mk){
   const diasUteis = diasUteisNoMes(mk);
   const dias = diasTrabalhadosNoMes(mk);
   const faltas = faltasNoMes(mk);
@@ -1620,7 +1724,6 @@ function openPayrollSummary(){
   if(dias >= diasUteis) salarioMes = payroll.salario;
   const vaMes = payroll.va * dias;
   const vcMes = payroll.vc * dias;
-  const totalMes = salarioMes + vaMes + vcMes;
 
   let extraMesMins = 0;
   Object.keys(records).filter(k=>monthKeyOf(k)===mk).forEach(k=>{
@@ -1628,17 +1731,49 @@ function openPayrollSummary(){
     if(t && !t.falta) extraMesMins += t.extraMins;
   });
 
+  const out = { diasUteis, dias, faltas, salarioMes, vaMes, vcMes, extraMesMins, isCLT: !!payroll.isCLT };
+
+  if(payroll.isCLT){
+    out.inss = calcINSS(salarioMes);
+    out.fgts = calcFGTS(salarioMes);
+    if(payroll.vtAtivo){
+      const vtMes = payroll.vtValorDia * dias;
+      out.vtMes = vtMes;
+      out.descontoVT = calcDescontoVT(salarioMes, vtMes, payroll.vtPercentual);
+    }else{
+      out.vtMes = 0;
+      out.descontoVT = 0;
+    }
+    out.salarioLiquido = salarioMes - out.inss - out.descontoVT;
+    out.totalMes = out.salarioLiquido + vaMes + vcMes;
+  }else{
+    out.totalMes = salarioMes + vaMes + vcMes;
+  }
+  return out;
+}
+
+function openPayrollSummary(){
+  if(!payroll){ openPayrollSetup(); return; }
+  const mk = viewMonth;
+  const b = computePayrollBreakdown(mk);
+
   document.getElementById('payrollTitle').textContent = `Fechamento — ${monthLabelOf(mk)}`;
   document.getElementById('payrollReceipt').innerHTML = `
-    <div class="receipt-row"><span class="r-label">Dias úteis no mês (seg. a sex.)</span><span class="r-value">${diasUteis}</span></div>
-    <div class="receipt-row"><span class="r-label">Dias trabalhados</span><span class="r-value">${dias} de ${diasUteis}</span></div>
-    <div class="receipt-row"><span class="r-label">Faltas registradas</span><span class="r-value">${faltas}</span></div>
-    <div class="receipt-row"><span class="r-label">Salário (proporcional)</span><span class="r-value">${formatBRL(salarioMes)}</span></div>
-    <div class="receipt-row"><span class="r-label">Vale Alimentação</span><span class="r-value">${formatBRL(vaMes)}</span></div>
-    <div class="receipt-row"><span class="r-label">Vale Combustível</span><span class="r-value">${formatBRL(vcMes)}</span></div>
-    <div class="receipt-row total"><span class="r-label">Total do mês</span><span class="r-value">${formatBRL(totalMes)}</span></div>
-    ${extraMesMins>0 ? `<div class="receipt-row"><span class="r-label">Hora extra no mês</span><span class="r-value" style="color:var(--stamp-red);">${formatMinutes(extraMesMins)}</span></div>` : ''}
-    <div class="receipt-note">Dias úteis calculados automaticamente pelo calendário (segunda a sexta). Hora extra é apenas informativa: não entra na conta do salário, pois não é remunerada.</div>
+    <div class="receipt-row"><span class="r-label">Dias úteis no mês (seg. a sex.)</span><span class="r-value">${b.diasUteis}</span></div>
+    <div class="receipt-row"><span class="r-label">Dias trabalhados</span><span class="r-value">${b.dias} de ${b.diasUteis}</span></div>
+    <div class="receipt-row"><span class="r-label">Faltas registradas</span><span class="r-value">${b.faltas}</span></div>
+    <div class="receipt-row"><span class="r-label">Salário bruto (proporcional)</span><span class="r-value">${formatBRL(b.salarioMes)}</span></div>
+    ${b.isCLT ? `
+    <div class="receipt-row"><span class="r-label">INSS (desconto)</span><span class="r-value" style="color:var(--stamp-red);">-${formatBRL(b.inss)}</span></div>
+    ${b.descontoVT>0 ? `<div class="receipt-row"><span class="r-label">Vale Transporte (desconto)</span><span class="r-value" style="color:var(--stamp-red);">-${formatBRL(b.descontoVT)}</span></div>` : ''}
+    <div class="receipt-row"><span class="r-label">Salário líquido</span><span class="r-value">${formatBRL(b.salarioLiquido)}</span></div>
+    ` : ''}
+    <div class="receipt-row"><span class="r-label">Vale Alimentação</span><span class="r-value">${formatBRL(b.vaMes)}</span></div>
+    <div class="receipt-row"><span class="r-label">Vale Combustível</span><span class="r-value">${formatBRL(b.vcMes)}</span></div>
+    <div class="receipt-row total"><span class="r-label">Total do mês (a receber)</span><span class="r-value">${formatBRL(b.totalMes)}</span></div>
+    ${b.isCLT ? `<div class="receipt-row"><span class="r-label">FGTS depositado (informativo)</span><span class="r-value">${formatBRL(b.fgts)}</span></div>` : ''}
+    ${b.extraMesMins>0 ? `<div class="receipt-row"><span class="r-label">Hora extra no mês</span><span class="r-value" style="color:var(--stamp-red);">${formatMinutes(b.extraMesMins)}</span></div>` : ''}
+    <div class="receipt-note">Dias úteis calculados automaticamente pelo calendário (segunda a sexta). Hora extra é apenas informativa: não entra na conta do salário, pois não é remunerada.${b.isCLT ? ' INSS calculado pela tabela progressiva vigente; FGTS é depositado pelo empregador e não é descontado do seu salário.' : ''}</div>
   `;
   document.getElementById('payrollOverlay').classList.add('show');
 }
@@ -1806,9 +1941,31 @@ function buildReportRows(){
   });
 }
 
-function exportA4(){
+function payrollBreakdownPairs(mk){
+  if(!payroll) return null;
+  const b = computePayrollBreakdown(mk);
+  const pairs = [
+    ['Dias úteis no mês', String(b.diasUteis)],
+    ['Dias trabalhados', `${b.dias} de ${b.diasUteis}`],
+    ['Faltas registradas', String(b.faltas)],
+    ['Salário bruto (proporcional)', formatBRL(b.salarioMes)],
+  ];
+  if(b.isCLT){
+    pairs.push(['INSS (desconto)', '-' + formatBRL(b.inss)]);
+    if(b.descontoVT>0) pairs.push(['Vale Transporte (desconto)', '-' + formatBRL(b.descontoVT)]);
+    pairs.push(['Salário líquido', formatBRL(b.salarioLiquido)]);
+  }
+  pairs.push(['Vale Alimentação', formatBRL(b.vaMes)]);
+  pairs.push(['Vale Combustível', formatBRL(b.vcMes)]);
+  pairs.push(['Total do mês (a receber)', formatBRL(b.totalMes)]);
+  if(b.isCLT) pairs.push(['FGTS depositado (informativo)', formatBRL(b.fgts)]);
+  return pairs;
+}
+
+async function exportA4(){
   const rows = buildReportRows();
   if(rows.length===0){ showToast('Não há registros para exportar.'); return; }
+  const includePayroll = payroll ? await askConfirm(`Incluir os valores de pagamento de ${monthLabelOf(viewMonth)} (salário, descontos) neste arquivo?`) : false;
   const nome = profile && profile.nome ? profile.nome : 'Não informado';
   const win = window.open('', '_blank');
   if(!win){ showToast('Permita pop-ups no navegador para exportar em A4.', 4000); return; }
@@ -1826,6 +1983,16 @@ function exportA4(){
       <td>${tot && tot.extraMins>0 ? formatMinutes(tot.extraMins) : '—'}</td>
     </tr>`;
   }).join('');
+  let payrollSection = '';
+  if(includePayroll){
+    const pairs = payrollBreakdownPairs(viewMonth);
+    payrollSection = `
+      <h2 style="font-size:15px;margin:24px 0 8px;">Pagamento — ${monthLabelOf(viewMonth)}</h2>
+      <table style="max-width:420px;">
+        ${pairs.map(([l,v])=>`<tr><td>${l}</td><td>${v}</td></tr>`).join('')}
+      </table>
+    `;
+  }
   win.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Controle de Ponto</title>
     <style>
       @page{ size:A4; margin:16mm; }
@@ -1843,15 +2010,17 @@ function exportA4(){
         <thead><tr><th>Data</th><th>Entrada</th><th>Saída Almoço</th><th>Volta Almoço</th><th>Saída</th><th>Total</th><th>Hora Extra</th></tr></thead>
         <tbody>${bodyRows}</tbody>
       </table>
+      ${payrollSection}
     </body></html>`);
   win.document.close();
   win.focus();
   setTimeout(()=>{ try{ win.print(); }catch(e){ /* usuário pode imprimir manualmente */ } }, 300);
 }
 
-function exportExcel(){
+async function exportExcel(){
   const rows = buildReportRows();
   if(rows.length===0){ showToast('Não há registros para exportar.'); return; }
+  const includePayroll = payroll ? await askConfirm(`Incluir os valores de pagamento de ${monthLabelOf(viewMonth)} (salário, descontos) neste arquivo?`) : false;
   const nome = profile && profile.nome ? profile.nome : 'Não informado';
   const bodyRows = rows.map(({key, rec, tot, isFalta})=>{
     if(isFalta){
@@ -1867,6 +2036,15 @@ function exportExcel(){
       <td>${tot && tot.extraMins>0 ? formatMinutes(tot.extraMins) : ''}</td>
     </tr>`;
   }).join('');
+  let payrollRows = '';
+  if(includePayroll){
+    const pairs = payrollBreakdownPairs(viewMonth);
+    payrollRows = `
+      <tr><td colspan="7"></td></tr>
+      <tr><td colspan="7" style="font-weight:bold;">Pagamento — ${monthLabelOf(viewMonth)}</td></tr>
+      ${pairs.map(([l,v])=>`<tr><td>${l}</td><td>${v}</td></tr>`).join('')}
+    `;
+  }
   const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
     <head><meta charset="UTF-8"></head><body>
       <table border="1">
@@ -1877,6 +2055,7 @@ function exportExcel(){
           <td>Data</td><td>Entrada</td><td>Saída Almoço</td><td>Volta Almoço</td><td>Saída</td><td>Total</td><td>Hora Extra</td>
         </tr>
         ${bodyRows}
+        ${payrollRows}
       </table>
     </body></html>`;
   const blob = new Blob(['\uFEFF'+html], {type:'application/vnd.ms-excel;charset=utf-8;'});
@@ -1993,6 +2172,8 @@ on('editFalta', 'change', toggleEditFaltaFields);
 
 on('payrollSetupCancel', 'click', closePayrollSetup);
 on('payrollSetupSave', 'click', onPayrollSetupSave);
+on('pIsCLT', 'change', toggleCLTFields);
+on('pVTAtivo', 'change', toggleVTFields);
 on('payrollClose', 'click', closePayrollSummary);
 on('payrollEditData', 'click', ()=>{ closePayrollSummary(); openPayrollSetup(); });
 
@@ -2213,6 +2394,16 @@ async function startApp(){
   // mesmo que o carregamento dos dados esteja demorando ou falhando.
   tickClock();
   setInterval(tickClock, 1000);
+
+  // Fase 1: mostra na hora o que já estava salvo neste aparelho da última
+  // vez, sem esperar a rede — deixa o app responsivo desde o primeiro instante.
+  hydrateFromCache();
+  renderProfile();
+  renderToday();
+  renderHistory();
+
+  // Fase 2: busca a versão mais atual no servidor (em paralelo, não em
+  // sequência) e atualiza a tela de novo se algo tiver mudado.
   await Promise.all([loadRecords(), loadSecurity(), loadPayroll(), loadProfile()]);
   renderProfile();
   renderToday();
