@@ -1257,6 +1257,12 @@ function firestoreFieldsToObj(fields){
     else if(v.booleanValue !== undefined) out[k] = v.booleanValue;
     else if(v.nullValue !== undefined) out[k] = null;
     else if(v.mapValue !== undefined) out[k] = firestoreFieldsToObj(v.mapValue.fields||{});
+    else if(v.arrayValue !== undefined) out[k] = (v.arrayValue.values||[]).map(item=>{
+      if(item.stringValue !== undefined) return item.stringValue;
+      if(item.integerValue !== undefined) return parseInt(item.integerValue,10);
+      if(item.mapValue !== undefined) return firestoreFieldsToObj(item.mapValue.fields||{});
+      return null;
+    });
     else out[k] = null;
   }
   return out;
@@ -1266,12 +1272,41 @@ function objToFirestoreFields(obj){
   for(const k in obj){
     const v = obj[k];
     if(v === null || v === undefined) fields[k] = { nullValue:null };
+    else if(Array.isArray(v)) fields[k] = { arrayValue:{ values: v.map(item=>{
+      if(typeof item === 'number') return Number.isInteger(item) ? {integerValue:String(item)} : {doubleValue:item};
+      if(typeof item === 'object') return { mapValue:{ fields: objToFirestoreFields(item) } };
+      return { stringValue:String(item) };
+    }) } };
     else if(typeof v === 'number') fields[k] = Number.isInteger(v) ? { integerValue:String(v) } : { doubleValue:v };
     else if(typeof v === 'boolean') fields[k] = { booleanValue:v };
     else if(typeof v === 'object') fields[k] = { mapValue:{ fields: objToFirestoreFields(v) } };
     else fields[k] = { stringValue:String(v) };
   }
   return fields;
+}
+// Some coleções negam list() pro ADM mesmo com as regras certas (limitação
+// chata do Firestore). Por isso, além de criar a solicitação, guardamos o
+// ID dela num índice (documento único) que o painel do ADM lê com "get"
+// em vez de listar a coleção inteira.
+async function addIdToIndex(indexDocId, novoId){
+  try{
+    const token = await auth.currentUser.getIdToken();
+    const url = `${FIRESTORE_REST_BASE}/admin_index/${indexDocId}`;
+    const getRes = await fetch(url, { headers:{ Authorization:`Bearer ${token}` } });
+    let ids = [];
+    if(getRes.ok){
+      const data = await getRes.json();
+      ids = firestoreFieldsToObj(data.fields).ids || [];
+    }
+    if(ids.includes(novoId)) return true;
+    ids.push(novoId);
+    const res = await fetch(url, {
+      method:'PATCH',
+      headers:{ Authorization:`Bearer ${token}`, 'Content-Type':'application/json' },
+      body: JSON.stringify({ fields: objToFirestoreFields({ ids }) })
+    });
+    return res.ok;
+  }catch(e){ return false; }
 }
 // --- solicitações de ajuste: toda edição/exclusão de ponto agora vira um
 // pedido pendente na coleção "solicitacoes", que só o ADM consegue ver e
@@ -1287,7 +1322,11 @@ async function createSolicitacao(fields){
       headers:{ Authorization:`Bearer ${token}`, 'Content-Type':'application/json' },
       body: JSON.stringify({ fields: objToFirestoreFields({ ...fields, uid, status:'pendente', criadoEm:new Date().toISOString() }) })
     });
-    return res.ok;
+    if(!res.ok) return false;
+    const created = await res.json();
+    const novoId = created.name.split('/').pop();
+    await addIdToIndex('solicitacoes', novoId);
+    return true;
   }catch(e){ return false; }
 }
 

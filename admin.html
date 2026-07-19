@@ -255,8 +255,11 @@ const firebaseConfig = {
   appId: "1:458473922894:web:f72ee3fa6f017af660fe1f",
   measurementId: "G-F7VQSSTHNN"
 };
-firebase.initializeApp(firebaseConfig);
-const auth = firebase.auth();
+// App nomeado (não o "[DEFAULT]") só pra isolar a sessão de login do ADM
+// da sessão do app do funcionário — mesmo os dois sendo servidos do
+// mesmo domínio, cada um guarda o login numa "gaveta" separada.
+const adminApp = firebase.initializeApp(firebaseConfig, 'AdminApp');
+const auth = adminApp.auth();
 const FIRESTORE_REST_BASE = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/default/documents`;
 
 const TIPOS = ['entrada','almocoSaida','almocoVolta','saida'];
