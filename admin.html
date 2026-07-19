@@ -408,7 +408,13 @@ async function loadSolicitacoes(){
   const res = await fetch(`${FIRESTORE_REST_BASE}/solicitacoes`, { headers:{ Authorization:`Bearer ${token}` } });
   const listEl = document.getElementById('solicitacoesList');
   const badge = document.getElementById('solicitacoesBadge');
-  if(!res.ok){ listEl.innerHTML = ''; badge.style.display='none'; return; }
+  if(!res.ok){
+    let detail = '';
+    try{ const errBody = await res.json(); detail = errBody.error && errBody.error.message ? errBody.error.message : ''; }catch(e){}
+    listEl.innerHTML = `<p class="error-text">Erro ao carregar solicitações (http ${res.status}${detail?': '+detail:''}).</p>`;
+    badge.style.display='none';
+    return;
+  }
   const data = await res.json();
   const todas = (data.documents||[]).map(doc=>{
     const id = doc.name.split('/').pop();
@@ -510,13 +516,15 @@ async function resolverSolicitacao(id, uid, aprovar){
 async function loadEmployees(){
   const token = await authToken();
   const res = await fetch(`${FIRESTORE_REST_BASE}/employees`, { headers:{ Authorization:`Bearer ${token}` } });
-  if(res.status === 403){
-    const uid = auth.currentUser ? auth.currentUser.uid : '—';
-    document.getElementById('employeesTableWrap').innerHTML = `<p class="error-text">Esta conta não tem permissão de ADM.<br>Crie no Firestore o documento <b>admins/${uid}</b> (esse é o UID desta conta logada agora) e entre de novo.</p>`;
-    return;
-  }
   if(!res.ok){
-    document.getElementById('employeesTableWrap').innerHTML = '<p class="error-text">Erro ao carregar (' + res.status + ').</p>';
+    let detail = '';
+    try{ const errBody = await res.json(); detail = errBody.error && errBody.error.message ? errBody.error.message : ''; }catch(e){}
+    const uid = auth.currentUser ? auth.currentUser.uid : '—';
+    let msg = `Erro ao carregar funcionários (http ${res.status}${detail?': '+detail:''}).<br>UID desta conta: <b>${uid}</b>`;
+    if(res.status === 403){
+      msg += `<br>Confira se existe o documento <b>admins/${uid}</b> no Firestore.`;
+    }
+    document.getElementById('employeesTableWrap').innerHTML = `<p class="error-text">${msg}</p>`;
     return;
   }
   const data = await res.json();
