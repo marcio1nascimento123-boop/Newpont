@@ -242,6 +242,13 @@ th{font-family:'Space Mono',monospace; font-size:10.5px; text-transform:uppercas
     </div>
 
     <div class="field-row"><label for="vaValorDia">Vale Alimentação por dia trabalhado (R$)</label><input type="number" id="vaValorDia" step="0.01" min="0"></div>
+    <div class="field-row">
+      <label for="vaForma">Vale Alimentação é pago em</label>
+      <select id="vaForma">
+        <option value="cartao">Cartão benefício</option>
+        <option value="dinheiro">Dinheiro</option>
+      </select>
+    </div>
 
     <div class="field-row" style="border-top:1.5px solid var(--line); padding-top:12px;">
       <label style="display:flex;align-items:center;gap:8px;font-weight:normal;text-transform:none;letter-spacing:0;">
@@ -252,6 +259,13 @@ th{font-family:'Space Mono',monospace; font-size:10.5px; text-transform:uppercas
     <div id="vtFields" style="display:none;">
       <div class="field-row"><label for="vtValorDia">Valor do vale transporte por dia (R$)</label><input type="number" id="vtValorDia" step="0.01" min="0"></div>
       <div class="field-row"><label for="vtPercentual">Percentual descontado do salário (%)</label><input type="number" id="vtPercentual" step="0.1" min="0" max="100" placeholder="Ex.: 6 (padrão legal é até 6%)"></div>
+      <div class="field-row">
+        <label for="vtForma">Vale Transporte é pago em</label>
+        <select id="vtForma">
+          <option value="cartao">Cartão benefício</option>
+          <option value="dinheiro">Dinheiro</option>
+        </select>
+      </div>
     </div>
 
     <p class="hint-text" id="cltHint" style="display:none;">Como é CLT, o INSS é descontado automaticamente pela tabela vigente, e o FGTS (informativo) é calculado também.</p>
@@ -434,7 +448,7 @@ async function criarFuncionario(){
     }
     const fields = {
       nome, identifier: authEmail, status:'ativo', demitidoEm:null,
-      tipoPagamento:'estagiario', salario:0, va:0, vtAtivo:false, vtValorDia:0, vtPercentual:0, diariaValores:{'4':0,'6':0,'8':0},
+      tipoPagamento:'estagiario', salario:0, va:0, vaForma:'cartao', vtAtivo:false, vtValorDia:0, vtPercentual:0, vtForma:'cartao', diariaValores:{'4':0,'6':0,'8':0},
       createdAt: new Date().toISOString()
     };
     const token = await authToken();
@@ -815,9 +829,11 @@ function openPayConfig(){
   document.getElementById('valor6h').value = dv['6']||dv[6]||0;
   document.getElementById('valor8h').value = dv['8']||dv[8]||0;
   document.getElementById('vaValorDia').value = e.va || '';
+  document.getElementById('vaForma').value = e.vaForma || 'cartao';
   document.getElementById('vtAtivoCheck').checked = !!e.vtAtivo;
   document.getElementById('vtValorDia').value = e.vtValorDia || '';
   document.getElementById('vtPercentual').value = e.vtPercentual || '';
+  document.getElementById('vtForma').value = e.vtForma || 'cartao';
   toggleTipoPagamentoFields();
   document.getElementById('payConfigOverlay').classList.add('show');
 }
@@ -836,9 +852,11 @@ async function savePayConfig(){
   const fields = {
     tipoPagamento: tipo,
     va: Number(document.getElementById('vaValorDia').value) || 0,
+    vaForma: document.getElementById('vaForma').value,
     vtAtivo,
     vtValorDia: vtAtivo ? (Number(document.getElementById('vtValorDia').value) || 0) : 0,
     vtPercentual: vtAtivo ? (Number(document.getElementById('vtPercentual').value) || 0) : 0,
+    vtForma: document.getElementById('vtForma').value,
   };
   if(tipo === 'diarista'){
     fields.diariaValores = {

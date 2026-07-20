@@ -2313,9 +2313,9 @@ function openPayrollSummary(){
     <div class="receipt-row"><span class="r-label">Faltas registradas</span><span class="r-value">${b.faltas}</span></div>
     <div class="receipt-row"><span class="r-label">${b.isDiaristaTipo ? 'Total das diárias' : 'Salário bruto (proporcional)'}</span><span class="r-value">${formatBRL(b.salarioMes)}</span></div>
     ${b.isCLT ? `<div class="receipt-row"><span class="r-label">INSS (desconto)</span><span class="r-value" style="color:var(--stamp-red);">-${formatBRL(b.inss)}</span></div>` : ''}
-    ${b.descontoVT>0 ? `<div class="receipt-row"><span class="r-label">Vale Transporte (desconto)</span><span class="r-value" style="color:var(--stamp-red);">-${formatBRL(b.descontoVT)}</span></div>` : ''}
+    ${b.descontoVT>0 ? `<div class="receipt-row"><span class="r-label">Vale Transporte (desconto${employee && employee.vtForma==='dinheiro' ? ', dinheiro' : ', cartão benefício'})</span><span class="r-value" style="color:var(--stamp-red);">-${formatBRL(b.descontoVT)}</span></div>` : ''}
     <div class="receipt-row"><span class="r-label">Líquido</span><span class="r-value">${formatBRL(b.salarioLiquido)}</span></div>
-    <div class="receipt-row"><span class="r-label">Vale Alimentação</span><span class="r-value">${formatBRL(b.vaMes)}</span></div>
+    <div class="receipt-row"><span class="r-label">Vale Alimentação${employee && employee.vaForma==='dinheiro' ? ' (dinheiro)' : ' (cartão benefício)'}</span><span class="r-value">${formatBRL(b.vaMes)}</span></div>
     <div class="receipt-row total"><span class="r-label">Total do mês (a receber)</span><span class="r-value">${formatBRL(b.totalMes)}</span></div>
     ${b.isCLT ? `<div class="receipt-row"><span class="r-label">FGTS depositado (informativo)</span><span class="r-value">${formatBRL(b.fgts)}</span></div>` : ''}
     ${b.extraMesMins>0 ? `<div class="receipt-row"><span class="r-label">Hora extra no mês</span><span class="r-value" style="color:var(--stamp-red);">${formatMinutes(b.extraMesMins)}</span></div>` : ''}

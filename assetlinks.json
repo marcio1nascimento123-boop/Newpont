@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "io.github.pontofeito.twa",
+        "sha256_cert_fingerprints": ["56:C9:C3:EF:97:0F:41:47:6C:AC:F8:D8:1E:2F:BC:66:2D:AA:C7:F3:47:27:8C:FF:35:D1:36:F6:E1:55:30:D8"]
+      }
+    }]
