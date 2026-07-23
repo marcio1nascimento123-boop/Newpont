@@ -986,6 +986,7 @@ function timeToMinutes(t){
   return h*60+m;
 }
 function formatMinutes(mins){
+  mins = Math.round(mins || 0);
   const h = Math.floor(mins/60);
   const mm = mins%60;
   return `${h}h${pad(mm)}`;
@@ -2316,6 +2317,33 @@ function diasFolgaNoMes(mk){
 function diasPagosNoMes(mk){
   return diasTrabalhadosNoMes(mk) + diasAbonoNoMes(mk) + diasFolgaNoMes(mk);
 }
+// Lê o consumo de saldo em minutos, aceitando tanto o formato novo
+// (minutos inteiros) quanto o antigo (horas em decimal, de versões
+// anteriores) — sempre arredondado.
+function folgaMinutosConsumidos(folga){
+  if(!folga) return 0;
+  if(folga.minutosConvertidos!=null) return Math.round(Number(folga.minutosConvertidos)||0);
+  return Math.round((Number(folga.horasConvertidas)||0)*60);
+}
+function extraMinutosConsumidos(x){
+  if(x.minutos!=null) return Math.round(Number(x.minutos)||0);
+  return Math.round((Number(x.horas)||0)*60);
+}
+// Saldo de hora extra acumulado (todos os meses) — quanto ainda dá pra
+// converter em folga ou pedir pago em dinheiro. É diferente da "hora
+// extra gerada no mês", que é só o total daquele mês, sem descontar o
+// que já foi usado.
+function computeSaldoExtraTotal(){
+  let totalExtraMins = 0;
+  Object.keys(records).forEach(k=>{
+    const t = calcTotal(records[k], k);
+    if(t && !t.falta) totalExtraMins += Math.round(t.extraMins||0);
+  });
+  let usadoMins = 0;
+  Object.keys(records).forEach(k=>{ usadoMins += folgaMinutosConsumidos(records[k].folga); });
+  extrasPagos.forEach(x=>{ usadoMins += extraMinutosConsumidos(x); });
+  return Math.round(totalExtraMins - usadoMins);
+}
 function diasUteisNoMes(mk){
   const [y,m] = mk.split('-').map(Number);
   const diasNoMes = new Date(y, m, 0).getDate();
@@ -2379,7 +2407,7 @@ function computePayrollBreakdown(mk){
   // Horas extras que o administrador marcou como "pagas em dinheiro" (em
   // vez de viradas em folga) neste mês.
   const extrasPagasDoMes = extrasPagos.filter(x=>x.mes===mk);
-  const extrasPagasMins = extrasPagasDoMes.reduce((s,x)=>s+(Number(x.horas)||0)*60, 0);
+  const extrasPagasMins = extrasPagasDoMes.reduce((s,x)=>s+extraMinutosConsumidos(x), 0);
   const extrasPagasValor = extrasPagasDoMes.reduce((s,x)=>s+(Number(x.valor)||0), 0);
 
   const out = { diasUteis, dias: diasFisicos, diasFisicos, diasAbono, diasFolga, diasPagos, faltas, salarioMes, vaMes, extraMesMins, isCLT, isDiaristaTipo, extrasPagasMins, extrasPagasValor, extrasPagasDoMes };
@@ -2433,8 +2461,9 @@ function openPayrollSummary(){
     ${b.extrasPagasValor>0 ? `<div class="receipt-row"><span class="r-label">Hora extra paga em dinheiro (${formatMinutes(b.extrasPagasMins)})</span><span class="r-value">${formatBRL(b.extrasPagasValor)}</span></div>` : ''}
     <div class="receipt-row total"><span class="r-label">Total do mês (a receber)</span><span class="r-value">${formatBRL(b.totalMes)}</span></div>
     ${b.isCLT ? `<div class="receipt-row"><span class="r-label">FGTS depositado (informativo)</span><span class="r-value">${formatBRL(b.fgts)}</span></div>` : ''}
-    ${b.extraMesMins>0 ? `<div class="receipt-row"><span class="r-label">Hora extra no mês</span><span class="r-value" style="color:var(--stamp-red);">${formatMinutes(b.extraMesMins)}</span></div>` : ''}
-    <div class="receipt-note">Valores configurados pelo administrador. Dias úteis calculados automaticamente pelo calendário (segunda a sexta).${b.isCLT ? ' INSS calculado pela tabela progressiva vigente; FGTS é depositado pelo empregador e não é descontado do seu salário.' : ''}</div>
+    ${b.extraMesMins>0 ? `<div class="receipt-row"><span class="r-label">Hora extra gerada neste mês</span><span class="r-value" style="color:var(--stamp-red);">${formatMinutes(b.extraMesMins)}</span></div>` : ''}
+    <div class="receipt-row"><span class="r-label">Saldo de hora extra disponível</span><span class="r-value">${formatMinutes(Math.max(0, computeSaldoExtraTotal()))}</span></div>
+    <div class="receipt-note">Valores configurados pelo administrador. Dias úteis calculados automaticamente pelo calendário (segunda a sexta). O saldo de hora extra é acumulado de todos os meses e diminui quando o administrador registra uma folga ou um pagamento em dinheiro.${b.isCLT ? ' INSS calculado pela tabela progressiva vigente; FGTS é depositado pelo empregador e não é descontado do seu salário.' : ''}</div>
   `;
   document.getElementById('payrollOverlay').classList.add('show');
 }
